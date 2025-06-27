@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>WeatherSnap</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: linear-gradient(to right, #83a4d4, #b6fbff);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 0 15px rgba(0,0,0,0.2);
+      width: 380px;
+      text-align: center;
+      position: relative;
+    }
+    input {
+      width: 80%;
+      padding: 10px;
+      margin-bottom: 10px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+    }
+    button {
+      padding: 10px 20px;
+      margin-top: 10px;
+      margin-right: 5px;
+      border: none;
+      background-color: #0077b6;
+      color: white;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .weather-info {
+      margin-top: 20px;
+      font-size: 1rem;
+    }
+    .suggestions {
+      position: absolute;
+      left: 10%;
+      top: 115px;
+      width: 80%;
+      background: #fff;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      text-align: left;
+      z-index: 10;
+      max-height: 150px;
+      overflow-y: auto;
+    }
+    .suggestion-item {
+      padding: 8px;
+      cursor: pointer;
+    }
+    .suggestion-item:hover {
+      background-color: #f0f0f0;
+    }
+    label {
+      display: block;
+      margin-top: 10px;
+      font-size: 0.9em;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>WeatherSnap 🌤️</h1>
+    <input type="text" id="cityInput" placeholder="Enter city name..." autocomplete="off" oninput="showSuggestions()"/>
+    <div id="suggestions" class="suggestions"></div>
+    <button onclick="getWeather()">Get Weather</button>
+    <button onclick="useMyLocation()">📍 My Location</button>
+    <label>
+      <input type="checkbox" id="unitToggle" onchange="toggleUnits()"/> °F
+    </label>
+    <div class="weather-info" id="weatherInfo"></div>
+  </div>
+
+  <script>
+    const weatherCodeMap = {
+      0: { description: "Clear Sky", icon: "☀️" },
+      1: { description: "Mainly Clear", icon: "🌤️" },
+      2: { description: "Partly Cloudy", icon: "⛅" },
+      3: { description: "Cloudy", icon: "☁️" },
+      45: { description: "Fog", icon: "🌫️" },
+      48: { description: "Depositing Rime Fog", icon: "🌫️" },
+      51: { description: "Drizzle", icon: "🌦️" },
+      61: { description: "Rain", icon: "🌧️" },
+      71: { description: "Snow", icon: "🌨️" },
+      80: { description: "Rain Showers", icon: "🌦️" },
+      95: { description: "Thunderstorm", icon: "⛈️" },
+    };
+
+    let unit = "celsius"; // default
+    let selectedCoords = null;
+
+    async function showSuggestions() {
+      const input = document.getElementById("cityInput").value.trim();
+      const suggestionsBox = document.getElementById("suggestions");
+      suggestionsBox.innerHTML = "";
+      selectedCoords = null;
+
+      if (input.length < 2) return;
+
+      try {
+        const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(input)}&count=5`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (!data.results) return;
+
+        data.results.forEach(loc => {
+          const div = document.createElement("div");
+          div.className = "suggestion-item";
+          div.innerText = `${loc.name}, ${loc.country}`;
+          div.onclick = () => {
+            document.getElementById("cityInput").value = `${loc.name}, ${loc.country}`;
+            selectedCoords = { lat: loc.latitude, lon: loc.longitude, name: loc.name, country: loc.country };
+            suggestionsBox.innerHTML = "";
+            getWeather();
+          };
+          suggestionsBox.appendChild(div);
+        });
+      } catch (e) {
+        console.log("Autocomplete error", e);
+      }
+    }
+
+    function toggleUnits() {
+      const checkbox = document.getElementById("unitToggle");
+      unit = checkbox.checked ? "fahrenheit" : "celsius";
+      getWeather(); // reload weather with new unit
+    }
+
+    async function getWeather() {
+      const infoBox = document.getElementById("weatherInfo");
+      infoBox.innerHTML = "";
+
+      let lat, lon, cityName, country;
+
+      if (selectedCoords) {
+        ({ lat, lon, name: cityName, country } = selectedCoords);
+      } else {
+        const city = document.getElementById("cityInput").value.trim();
+        if (!city) {
+          infoBox.innerHTML = `<p style="color:red;">Please enter a city</p>`;
+          return;
+        }
+        const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}`;
+        const geoRes = await fetch(geoUrl);
+        const geoData = await geoRes.json();
+        if (!geoData.results || geoData.results.length === 0) {
+          infoBox.innerHTML = `<p style="color:red;">City not found</p>`;
+          return;
+        }
+        lat = geoData.results[0].latitude;
+        lon = geoData.results[0].longitude;
+        cityName = geoData.results[0].name;
+        country = geoData.results[0].country;
+      }
+
+      const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&daily=temperature_2m_max,temperature_2m_min,weathercode&temperature_unit=${unit}&timezone=auto`;
+      try {
+        const res = await fetch(weatherUrl);
+        const data = await res.json();
+
+        const current = data.current_weather;
+        const mapped = weatherCodeMap[current.weathercode] || { description: "Unknown", icon: "" };
+        const unitSymbol = unit === "fahrenheit" ? "°F" : "°C";
+
+        let currentHTML = `
+          <h2>${cityName}, ${country}</h2>
+          <p><strong>Current:</strong> ${mapped.icon} ${mapped.description}</p>
+          <p><strong>Temperature:</strong> ${current.temperature}${unitSymbol}</p>
+          <p><strong>Windspeed:</strong> ${current.windspeed} km/h</p>
+        `;
+
+        const forecast = data.daily;
+        const today = new Date();
+        let forecastHTML = `<h3>5-Day Forecast</h3>`;
+        for (let i = 0; i < 5; i++) {
+          const code = forecast.weathercode[i];
+          const dayMapped = weatherCodeMap[code] || { description: "Unknown", icon: "" };
+          const date = new Date(forecast.time[i]);
+          const dayName =
+            i === 0
+              ? "Today"
+              : i === 1
+              ? "Tomorrow"
+              : date.toLocaleDateString("en-US", { weekday: "long" });
+
+          forecastHTML += `
+            <p><strong>${dayName}:</strong> ${dayMapped.icon} ${dayMapped.description} | ${forecast.temperature_2m_min[i]}${unitSymbol} - ${forecast.temperature_2m_max[i]}${unitSymbol}</p>
+          `;
+        }
+
+        infoBox.innerHTML = currentHTML + forecastHTML;
+      } catch (e) {
+        console.log("Weather fetch error", e);
+        infoBox.innerHTML = `<p style="color:red;">Error fetching weather</p>`;
+      }
+    }
+
+    function useMyLocation() {
+      if (!navigator.geolocation) {
+        alert("Geolocation not supported");
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(async pos => {
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        selectedCoords = { lat, lon, name: "Your Location", country: "" };
+        getWeather();
+      }, () => {
+        alert("Permission denied.");
+      });
+    }
+  </script>
+</body>
+</html>
